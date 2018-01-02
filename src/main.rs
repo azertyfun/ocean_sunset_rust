@@ -58,13 +58,13 @@ static WIDTH: u32 = 640;
 static HEIGHT: u32 = 480;
 
 // Vertical position of the sun
-static SUN_POSITION_Y: f64 = 100.0;
+static SUN_POSITION_Y: f64 = 220.0;
 
 // Number of cyan vertical lines
 static N_VERT_LINES: i32 = 80;
 
 // Starting vertical position of the lines (from the top)
-static LINES_TOP: i32 = 120;
+static LINES_TOP: i32 = 240;
 
 // Maximum distance between two horizontal lines (at the bottom)
 static LINES_MAX_DISTANCE: u32 = 50;
@@ -72,6 +72,10 @@ static LINES_MAX_DISTANCE: u32 = 50;
 static LINES_MIN_DISTANCE: u32 = 10;
 // Minimum speed modifier of the animation (so that the top line doesn't stay in place)
 static MINIMUM_SPEED: f64 = 0.2;
+
+// a and b values of the reflection ellipse
+static SUN_REFLECTION_A: f64 = 100.0;
+static SUN_REFLECTION_B: f64 = 350.0;
 
 enum Color {
     Blue,
@@ -103,8 +107,17 @@ fn background(x: u32, y: u32) -> Rgb<u8> {
 
     let mut color;
 
+    // Sun reflection
+    if y > LINES_TOP as u32 {
+        return if (x as f64 - WIDTH as f64 / 2.0) * (x as f64 - WIDTH as f64 / 2.0) / (SUN_REFLECTION_A * SUN_REFLECTION_A) + (y as f64 - SUN_POSITION_Y) * (y as f64 - SUN_POSITION_Y) / (SUN_REFLECTION_B * SUN_REFLECTION_B) < 1.0 {
+            palette(Color::Red, 0.2)
+        } else {
+            palette(Color::Red, 0.0)
+        };
+    }
+
     let distance = dist((x as f64, w/2.0), (y as f64, SUN_POSITION_Y)); // Distance from the center of the sun
-    let max_distance = (w*w + h*h).sqrt(); // Greater than the maximum distance from the center of the sun we will ever see, which is the diagonal of the screen √(width² + height²). This is not an ideal value (it could be further reduced), but this looks good enough for the gradient effect.
+    let max_distance = (w*w + h*h).sqrt() / 1.5; // Greater than the maximum distance from the center of the sun we will ever see, which is the diagonal of the screen √(width² + height²). This is not an ideal value (it could be further reduced), but this looks good enough for the gradient effect.
 
     if distance > 75.0 {
         color = 0.65 - distance / max_distance;
@@ -233,7 +246,7 @@ fn build_img(i: u32) {
     println!("Scanlines done.");
 
     // Output to file
-    let ref mut fout = File::create(format!("out/out{}.png", i)).unwrap();
+    let ref mut fout = File::create(format!("out/out{:05}.png", i)).unwrap();
     image::ImageRgb8(img).save(fout, image::PNG).unwrap();
     println!("File saved.");
 }
