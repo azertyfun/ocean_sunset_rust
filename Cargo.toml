@@ -1,0 +1,9 @@
+[package]
+name = "outrun_test"
+version = "0.1.0"
+authors = ["azertyfun <azertyfun_poubelle@hotmail.fr>"]
+
+[dependencies]
+
+image = "*"
+lazy_static = "*"
