@@ -1,25 +1,38 @@
-extern crate image;
+extern crate sdl2;
 
-use std::fs::File;
-use image::{ImageBuffer, Rgb, Pixel};
+use sdl2::pixels::Color;
+use sdl2::rect::Point;
 
 #[macro_use]
 extern crate lazy_static;
 
+trait ColorTrait<F> where F: Fn(u8) -> u8 {
+    fn apply(&mut self, f: F);
+}
+
+impl <F> ColorTrait<F> for Color where F: Fn(u8) -> u8 {
+    fn apply(&mut self, f: F) {
+        self.r = f(self.r);
+        self.g = f(self.g);
+        self.b = f(self.b);
+        self.a = f(self.a);
+    }
+}
+
 // We do not want to dynamically generate the palette on every use, so we generate it lazylly when the program starts
 lazy_static! {
-    static ref PALETTE: [[Rgb<u8>; 5]; 3] = {
+    static ref PALETTE: [[Color; 5]; 3] = {
         // Palette's base colors generated on paletton and brightened.
         // Original colors were (29, 14, 115), (0, 101, 97), (131, 0, 80).
         let base_colors = [
-            Rgb([47, 24, 200]), // BLUE
-            Rgb([0, 200, 190]), // CYAN
-            Rgb([200, 0, 123]), // RED
+            Color::RGB(47, 24, 200), // BLUE
+            Color::RGB(0, 200, 190), // CYAN
+            Color::RGB(200, 0, 123), // RED
         ];
 
         // We generate a palette with, for each base color, a gradient of 5 colors from brightest to darkest
         // For a total of 15 colors
-        let mut palette: [[Rgb<u8>; 5]; 3] = [[Rgb([0, 0, 0]); 5]; 3];
+        let mut palette: [[Color; 5]; 3] = [[Color::RGB(0, 0, 0); 5]; 3];
 
         for i in 0..3 {
             palette[i] = [
@@ -45,7 +58,7 @@ lazy_static! {
                     });
                     color
                 },
-                Rgb([0u8, 0u8, 0u8]),
+                Color::RGB(0u8, 0u8, 0u8),
             ]
         }
         
@@ -54,8 +67,8 @@ lazy_static! {
 }
 
 // Dimensions of the canvas
-static WIDTH: u32 = 640;
-static HEIGHT: u32 = 480;
+static WIDTH: i32 = 640;
+static HEIGHT: i32 = 480;
 
 // Vertical position of the sun
 static SUN_POSITION_Y: f64 = 220.0;
@@ -77,20 +90,20 @@ static MINIMUM_SPEED: f64 = 0.2;
 static SUN_REFLECTION_A: f64 = 100.0;
 static SUN_REFLECTION_B: f64 = 350.0;
 
-enum Color {
+enum BaseColor {
     Blue,
     Cyan,
     Red
 }
 
 // palette() returns an Rgb value for a given color and value in [0; 1]
-fn palette(primary: Color, value: f64) -> Rgb<u8> {
+fn palette(primary: BaseColor, value: f64) -> Color {
     if value > 1.0 || value < 0.0 {
         panic!("value should be in [0; 1]!");
     }
 
     PALETTE[match primary {
-        Color::Blue => 0, Color::Cyan => 1, Color::Red => 2
+        BaseColor::Blue => 0, BaseColor::Cyan => 1, BaseColor::Red => 2
     }][((1.0 - value) * 4.0).round() as usize]
 }
 
@@ -101,18 +114,18 @@ fn dist(x: (f64, f64), y: (f64, f64)) -> f64 {
 
 // background() returns the background color for a given pixel
 // This is done using a maximum brightness circle for the sun, and dimmer concentric circles for the sunset effect
-fn background(x: u32, y: u32) -> Rgb<u8> {
+fn background(x: i32, y: i32) -> Color {
     let w = WIDTH as f64;
     let h = HEIGHT as f64;
 
     let mut color;
 
     // Sun reflection
-    if y > LINES_TOP as u32 {
+    if y > LINES_TOP {
         return if (x as f64 - WIDTH as f64 / 2.0) * (x as f64 - WIDTH as f64 / 2.0) / (SUN_REFLECTION_A * SUN_REFLECTION_A) + (y as f64 - SUN_POSITION_Y) * (y as f64 - SUN_POSITION_Y) / (SUN_REFLECTION_B * SUN_REFLECTION_B) < 1.0 {
-            palette(Color::Red, 0.2)
+            palette(BaseColor::Red, 0.2)
         } else {
-            palette(Color::Red, 0.0)
+            palette(BaseColor::Red, 0.0)
         };
     }
 
@@ -129,44 +142,13 @@ fn background(x: u32, y: u32) -> Rgb<u8> {
         color = 1.0;
     }
 
-    palette(Color::Red, color)
-}
-
-// make_line() draws a line using the Digital Differential Analyzer algorithm (DDA). It stores the pixels belonging to the line in the `lines` vector.
-fn make_line(lines: &mut Vec<(u32, u32)>, start: &mut (i32, i32), end: &mut (i32, i32)) {
-    let m = (end.1 as f64 - start.1 as f64) / (end.0 as f64 - start.0 as f64);
-
-    if m < 0.0 && start.0 < end.0 {
-        let tmp = *start;
-        *start = *end;
-        *end = tmp;
-    }
-
-    let dx = end.0 - start.0;
-    let dy = end.1 - start.1;
-
-    let steps = if dx.abs() > dy.abs() {
-        dx.abs()
-    } else {
-        dy.abs()
-    };
-
-    let x_inc = dx as f64 / steps as f64;
-    let y_inc = dy as f64 / steps as f64;
-
-    let mut x_k = start.0 as f64;
-    let mut y_k = start.1 as f64;
-
-    for _ in 0..steps {
-        x_k += x_inc;
-        y_k += y_inc;
-
-        lines.push((x_k.round() as u32, y_k.round() as u32));
-    }
+    palette(BaseColor::Red, color)
 }
 
 // make_lines() is responsible for creating the cyan lines. It is also responsible for handling the animation for a given v_offset.
-fn make_lines(lines: &mut Vec<(u32, u32)>, v_offset: u32) -> bool {
+fn make_lines(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, v_offset: u32) -> bool {
+    canvas.set_draw_color(palette(BaseColor::Cyan, 1.0));
+
     /*
      * Vertical lines
      */
@@ -177,7 +159,7 @@ fn make_lines(lines: &mut Vec<(u32, u32)>, v_offset: u32) -> bool {
         let mut start = (((start_rel + 1.0) * WIDTH as f64 / 2.0) as i32, HEIGHT as i32);
         let mut end = (((end_rel + 1.0) * WIDTH as f64 / 2.0) as i32, LINES_TOP);
 
-        make_line(lines, &mut start, &mut end);
+        canvas.draw_line(Point::new(start.0, start.1), Point::new(end.0, end.1)).unwrap();
     }
 
 
@@ -192,8 +174,8 @@ fn make_lines(lines: &mut Vec<(u32, u32)>, v_offset: u32) -> bool {
      * dist_from_top is the distance relative from the top, from 0 to 1, for the current scan line;
      * next_scan_line is the number of steps that must be done before drawing the next line.
      */
-    make_line(lines, &mut (0i32, LINES_TOP as i32), &mut (WIDTH as i32, LINES_TOP as i32)); // There must always be a top-most line meeting the end of the vertical lines to not look weird
-    make_line(lines, &mut (0i32, LINES_TOP + (v_offset as f64 * MINIMUM_SPEED) as i32), &mut (WIDTH as i32, LINES_TOP + (v_offset as f64 * MINIMUM_SPEED) as i32)); // We write the top-most line manually to compensate for the disappearing bottom-most line (comment this line to see what happens otherwise)
+    canvas.draw_line(Point::new(0, LINES_TOP), Point::new(WIDTH, LINES_TOP)).unwrap();
+    canvas.draw_line(Point::new(0, LINES_TOP + (v_offset as f64 * MINIMUM_SPEED) as i32), Point::new(WIDTH, LINES_TOP + (v_offset as f64 * MINIMUM_SPEED) as i32)).unwrap();
     for i in LINES_TOP as i32..HEIGHT as i32 {
         if i < LINES_TOP {
             steps_without_line += 1;
@@ -204,7 +186,7 @@ fn make_lines(lines: &mut Vec<(u32, u32)>, v_offset: u32) -> bool {
         let next_scan_line = ((LINES_MAX_DISTANCE - LINES_MIN_DISTANCE) as f64 * dist_from_top + LINES_MIN_DISTANCE as f64) as u32;
 
         if steps_without_line as u32 >= next_scan_line {
-            make_line(lines, &mut (0i32, i + (v_offset as f64 * (dist_from_top + MINIMUM_SPEED)) as i32), &mut (WIDTH as i32, i + (v_offset as f64 * (dist_from_top + MINIMUM_SPEED)) as i32));
+            canvas.draw_line(Point::new(0, i + (v_offset as f64 * (dist_from_top + MINIMUM_SPEED)) as i32), Point::new(WIDTH, i + (v_offset as f64 * (dist_from_top + MINIMUM_SPEED)) as i32)).unwrap();
             steps_without_line = 0;
         }
 
@@ -215,58 +197,50 @@ fn make_lines(lines: &mut Vec<(u32, u32)>, v_offset: u32) -> bool {
 }
 
 // build_img() is responsible for making the image file for a given offset i
-fn build_img(i: u32) {
-    let mut img = ImageBuffer::new(WIDTH, HEIGHT);
-
+fn build_img(canvas: &mut sdl2::render::Canvas<sdl2::video::Window>, i: u32) {
     // Background
-    for (x, y, pixel) in img.enumerate_pixels_mut() {
-        *pixel = background(x, y);
+    for x in 0..WIDTH {
+        for y in 0..HEIGHT {
+            let mut pixel = background(x, y);
+
+            // Scan lines effect
+            if y % 2 == 0 {
+                pixel.r /= 2;
+                pixel.g /= 2;
+                pixel.b /= 2;
+            }
+
+            canvas.set_draw_color(pixel);
+            canvas.draw_point(Point::new(x, y)).unwrap();
+        }
     }
-    println!("Background done.");
 
     // Cyan lines
-    let mut lines: Vec<(u32, u32)> = Vec::new();
-    make_lines(&mut lines, i);
-    for pixel in lines {
-        if pixel.0 < WIDTH && pixel.1 < HEIGHT {
-            *img.get_pixel_mut(pixel.0, pixel.1) = palette(Color::Cyan, 1.0);
-        }
-    }
-    println!("Lines done.");
-
-    // Scanline effect
-    let cyan_pixel = palette(Color::Cyan, 1.0); // We do not want to apply the scanline effect to the grid pattern, as it is perfectly parallel and would therefore look weird
-    for (_, y, pixel) in img.enumerate_pixels_mut() {
-        if y % 2 == 0 && *pixel != cyan_pixel {
-            pixel.apply(|v| {
-                v / 2
-            });
-        }
-    }
-    println!("Scanlines done.");
-
-    // Output to file
-    let ref mut fout = File::create(format!("out/out{:05}.png", i)).unwrap();
-    image::ImageRgb8(img).save(fout, image::PNG).unwrap();
-    println!("File saved.");
+    make_lines(canvas, i);
 }
 
 fn main() {
-    let start = std::time::Instant::now();
+    let sdl_context = sdl2::init().unwrap();
+    let video_subsys = sdl_context.video().unwrap();
+    let window = video_subsys.window("Ocean Sunset Rust", WIDTH as u32, HEIGHT as u32).position_centered().opengl().build().unwrap();
+    let mut canvas = window.into_canvas().build().unwrap();
 
-    // We create as many threads as there are images. Even for a large value of LINES_MAX_DISTANCE, this isn't a problem as the threads are very memory inexpensive.
-    let mut handles = Vec::new();
-    for i in 0..LINES_MAX_DISTANCE {
-        handles.push(std::thread::spawn(move || {
-            build_img(i);
-        }));
+    canvas.set_draw_color(Color::RGB(128, 128, 128));
+    canvas.clear();
+    canvas.present();
+
+    let mut events = sdl_context.event_pump().unwrap();
+    let mut i = 0u64;
+    'main: loop {
+        for event in events.poll_iter() {
+            match event {
+                sdl2::event::Event::Quit {..} => break 'main,
+                _ => ()
+            }
+        }
+
+        build_img(&mut canvas, (i % LINES_MAX_DISTANCE as u64) as u32);
+        canvas.present();
+        i += 1;
     }
-
-    for handle in handles {
-        handle.join().unwrap();
-    }
-
-    let elapsed = start.elapsed();
-
-    println!("Generated animation in {}.{:03} s.", elapsed.as_secs(), (elapsed.subsec_nanos() as f64 / 1e6) as u32);
 }

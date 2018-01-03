@@ -7,3 +7,4 @@ authors = ["azertyfun <azertyfun_poubelle@hotmail.fr>"]
 
 image = "*"
 lazy_static = "*"
+sdl2 = "0.31"
